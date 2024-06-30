@@ -1,0 +1,9 @@
+[package]
+name = "slim-runner"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+polars = { version = "0.41.2", features = ["performant", "lazy", "parquet", "streaming"] }
+rayon = "1.10.0"
+toml = "0.8.14"
