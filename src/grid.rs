@@ -1,6 +1,6 @@
 use color_eyre::eyre;
 use color_eyre::eyre::Result;
-use indicatif::{MultiProgress, ProgressBar};
+use indicatif::{MultiProgress, ProgressBar, ProgressState, ProgressStyle};
 use itertools::{Itertools, MultiProduct};
 use log::{debug, info};
 use polars::prelude::*;
@@ -340,6 +340,11 @@ impl Grid {
 
         // draw the progress bar
         let pb = bar.add(ProgressBar::new(self.total_runs as u64));
+        let style = ProgressStyle::with_template(
+            "{spinner:.purple} [{elapsed}/{duration}] [{bar:.cyan/blue}] {human_pos}/{human_len}",
+        )
+        .unwrap();
+        pb.set_style(style);
 
         // create the output directory if it does not exist
         if !self.output_dir.exists() {
@@ -371,11 +376,9 @@ impl Grid {
                     .collect::<Vec<IteratorOutput>>()
                     .par_iter_mut()
                     .map(|(i, num_ann, str_ann, command)| {
-                        // even if iterations are processed out of order,
-                        // the progress bar should still update approximately correctly
-                        if *i % 5 == 0 {
-                            pb.inc(5);
-                        }
+                        pb.inc(1);
+
+                        debug!("Running command for iteration {:?}", i);
 
                         let output = command
                             .output()
@@ -389,12 +392,16 @@ impl Grid {
                             ));
                         }
 
+                        debug!("reading csv output from SLiM for iteration {:?}", i);
+
                         let d = CsvReader::new(Cursor::new(&output.stdout))
                             .finish()
                             .map_err(|e| {
                                 eyre::eyre!("Failed to parse SLiM output into a table: {}", e)
                             })?
                             .lazy();
+
+                        debug!("annotating dataframe for iteration {:?}", i);
 
                         // add numerical annotations
                         let d = d.with_columns(
@@ -410,8 +417,8 @@ impl Grid {
                         let d = d.with_column(col("replicate").cast(DataType::Int64));
 
                         // add string annotations if there are any
-                        if str_ann.is_empty() {
-                            Ok(d)
+                        let d = if str_ann.is_empty() {
+                            d
                         } else {
                             let d = d.with_columns(
                                 str_ann
@@ -419,11 +426,15 @@ impl Grid {
                                     .map(|(k, v)| lit(v.clone()).alias(k))
                                     .collect::<Vec<_>>(),
                             );
-                            Ok(d)
-                        }
+                            d
+                        };
+
+                        Ok(d)
                     })
                     .collect::<Result<Vec<_>>>()
                     .map_err(|e| eyre::eyre!("Failed to run SLiM commands: {}", e))?;
+
+                debug!("Ran all commands for chunk {}", i_chunk);
 
                 // combine all results into a single DataFrame
                 let mut d = concat(results, UnionArgs::default())?.collect()?;
@@ -434,7 +445,7 @@ impl Grid {
                     eyre::eyre!("Failed to create output file {}: {}", path.display(), e)
                 })?;
 
-                debug!("Writing output to {}", path.display());
+                debug!("Writing chunk {} output to {}", i_chunk, path.display());
                 ParquetWriter::new(file).finish(&mut d).map_err(|e| {
                     eyre::eyre!(
                         "Failed to write parquet output to {}: {}",

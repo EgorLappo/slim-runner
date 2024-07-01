@@ -8,7 +8,7 @@ script = "example_script.slim"
 # output directory
 output_dir = "output"
 # number of threads to use
-cores = 6
+cores = 1
 # interval to write output to disk in parameter sets
 write_every = 1000
 # annotate the output log files with parameter values
