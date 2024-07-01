@@ -371,10 +371,11 @@ impl Grid {
                     .collect::<Vec<IteratorOutput>>()
                     .par_iter_mut()
                     .map(|(i, num_ann, str_ann, command)| {
-                        // if *i % 10 == 0 {
-                        //     pb.inc(10);
-                        // }
-                        pb.inc(1);
+                        // even if iterations are processed out of order,
+                        // the progress bar should still update approximately correctly
+                        if *i % 5 == 0 {
+                            pb.inc(5);
+                        }
 
                         let output = command
                             .output()
