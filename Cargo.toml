@@ -4,6 +4,21 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-polars = { version = "0.41.2", features = ["performant", "lazy", "parquet", "streaming"] }
+clap = { version = "4.5.8", features = ["derive"] }
+color-eyre = "0.6.3"
+env_logger = "0.11.3"
+indicatif = "0.17.8"
+indicatif-log-bridge = "0.2.2"
+itertools = "0.13.0"
+jemallocator = "0.5.4"
+log = "0.4.22"
+polars = { version = "0.41.2", features = [
+    "performant",
+    "lazy",
+    "parquet",
+    "streaming",
+] }
+rand = { version = "0.8.5", features = ["small_rng"] }
 rayon = "1.10.0"
+serde = { version = "1.0.203", features = ["derive"] }
 toml = "0.8.14"
