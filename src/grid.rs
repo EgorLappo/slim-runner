@@ -1,6 +1,6 @@
-use color_eyre::eyre;
-use color_eyre::eyre::Result;
-use indicatif::{MultiProgress, ProgressBar, ProgressState, ProgressStyle};
+use color_eyre::eyre::{self, Result};
+use crossbeam_channel::{Receiver, Sender};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use itertools::{Itertools, MultiProduct};
 use log::{debug, info};
 use polars::prelude::*;
@@ -9,6 +9,7 @@ use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::env;
 use std::fs;
 use std::io::Cursor;
@@ -173,7 +174,7 @@ impl Iterator for CommandIterator {
         }
 
         // obtain new parameters if we have exhausted the replicates
-        if self.current_replicate > self.replicates {
+        if self.current_replicate >= self.replicates {
             if let Some(new_parameters) = self.num_cartprod.next() {
                 self.current_parameters = self
                     .num_keys
@@ -251,9 +252,21 @@ pub struct Grid {
 }
 
 impl Grid {
-    pub fn new<P: AsRef<Path>>(config_file: P) -> Result<Self> {
-        let config = std::fs::read_to_string(config_file)?;
-        let config: GridConfig = toml::from_str(&config)?;
+    pub fn new<P: AsRef<Path> + Clone>(config_file: P) -> Result<Self> {
+        let config = std::fs::read_to_string(&config_file).map_err(|e| {
+            eyre::eyre!(
+                "Failed to read config file {}: {}",
+                config_file.as_ref().display(),
+                e
+            )
+        })?;
+        let config: GridConfig = toml::from_str(&config).map_err(|e| {
+            eyre::eyre!(
+                "Failed to parse config file {}: {}",
+                config_file.as_ref().display(),
+                e
+            )
+        })?;
 
         let mut string_parameters = HashMap::new();
         let mut num_parameters = HashMap::new();
@@ -261,15 +274,24 @@ impl Grid {
         for (name, param) in config.grid {
             match param {
                 ConfigParameter::Value(val) => {
-                    num_parameters.insert(name, vec![val]);
+                    let value = vec![val];
+                    debug!("Adding numerical parameter {} with value {:?}", name, value);
+                    num_parameters.insert(name, value);
                 }
                 ConfigParameter::List(list) => {
+                    debug!("Adding numerical parameter {} with values {:?}", name, list);
                     num_parameters.insert(name, list);
                 }
                 ConfigParameter::Range(range) => {
-                    num_parameters.insert(name, range.values());
+                    let values = range.values();
+                    debug!(
+                        "Adding numerical parameter {} with values {:?}",
+                        name, values
+                    );
+                    num_parameters.insert(name, values);
                 }
                 ConfigParameter::String(string) => {
+                    debug!("Adding string parameter {} with value {:?}", name, string);
                     string_parameters.insert(name, string);
                 }
             }
@@ -346,122 +368,179 @@ impl Grid {
         .unwrap();
         pb.set_style(style);
 
-        // create the output directory if it does not exist
-        if !self.output_dir.exists() {
-            debug!("Creating output directory: {}", self.output_dir.display());
-            std::fs::create_dir_all(&self.output_dir).map_err(|e| {
-                eyre::eyre!(
-                    "Failed to create output directory {}: {}",
-                    self.output_dir.display(),
-                    e
-                )
-            })?;
-        }
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        // spawn the "writer" thread that will write the output to disk
+        let writer = std::thread::spawn(self.writer(receiver));
 
-        // i have two ideas how to arrange parallel running here
-        // one is implemented below with chunking the iterator,
-        //   then running a single chunk in parallel and writing a compressed parquet file
-        // another one is to have a sort of IO thread that writes the output to disk in parallel
-        //   that thread would have a mutex'd buffer to which the other threads would write their data
-
+        // run the commands in parallel with rayon
         self.command_iter
-            // split iterator into chunks
-            // we will write data to disk after each chunk
-            .chunks(self.write_every)
-            .into_iter()
-            .enumerate()
-            .map(|(i_chunk, chunk)| {
-                debug!("Running chunk {}", i_chunk);
-                let results = chunk
-                    .collect::<Vec<IteratorOutput>>()
-                    .par_iter_mut()
-                    .map(|(i, num_ann, str_ann, command)| {
-                        pb.inc(1);
-
-                        debug!("Running command for iteration {:?}", i);
-
-                        let output = command
-                            .output()
-                            .map_err(|e| eyre::eyre!("Failed to execute SLiM command: {}", e))?;
-
-                        if !output.status.success() {
-                            return Err(eyre::eyre!(
-                                "SLiM command failed with exit code {}: {}",
-                                output.status,
-                                String::from_utf8_lossy(&output.stderr)
-                            ));
-                        }
-
-                        debug!("reading csv output from SLiM for iteration {:?}", i);
-
-                        let d = CsvReader::new(Cursor::new(&output.stdout))
-                            .finish()
-                            .map_err(|e| {
-                                eyre::eyre!("Failed to parse SLiM output into a table: {}", e)
-                            })?
-                            .lazy();
-
-                        debug!("annotating dataframe for iteration {:?}", i);
-
-                        // add numerical annotations
-                        let d = d.with_columns(
-                            num_ann
-                                .iter()
-                                .map(|(k, v)| lit(*v).alias(k))
-                                .collect::<Vec<_>>(),
-                        );
-
-                        //debug!("got dataframe {:?}", d.clone().collect());
-
-                        // make replicate an integer column
-                        let d = d.with_column(col("replicate").cast(DataType::Int64));
-
-                        // add string annotations if there are any
-                        let d = if str_ann.is_empty() {
-                            d
-                        } else {
-                            let d = d.with_columns(
-                                str_ann
-                                    .iter()
-                                    .map(|(k, v)| lit(v.clone()).alias(k))
-                                    .collect::<Vec<_>>(),
-                            );
-                            d
-                        };
-
-                        Ok(d)
-                    })
-                    .collect::<Result<Vec<_>>>()
-                    .map_err(|e| eyre::eyre!("Failed to run SLiM commands: {}", e))?;
-
-                debug!("Ran all commands for chunk {}", i_chunk);
-
-                // combine all results into a single DataFrame
-                let mut d = concat(results, UnionArgs::default())?.collect()?;
-
-                // write the output to files
-                let path = self.output_dir.join(format!("output_{}.parquet", i_chunk));
-                let file = fs::File::create(&path).map_err(|e| {
-                    eyre::eyre!("Failed to create output file {}: {}", path.display(), e)
-                })?;
-
-                debug!("Writing chunk {} output to {}", i_chunk, path.display());
-                ParquetWriter::new(file).finish(&mut d).map_err(|e| {
-                    eyre::eyre!(
-                        "Failed to write parquet output to {}: {}",
-                        path.display(),
-                        e
-                    )
-                })?;
-                Ok(())
-            })
-            // make sure all elements are ok
-            .collect::<Result<Vec<_>>>()?;
+            .par_bridge()
+            // each work unit gets a reference to the sender for the channel
+            // at the end, the complete dataframe is sent to the channel
+            .map_with(sender, Grid::worker(&pb))
+            .collect::<Result<Vec<_>>>()
+            .map_err(|e| eyre::eyre!("Failed to run SLiM commands: {}", e))?;
 
         pb.finish();
 
-        info!("All chunks have been run successfully");
+        // wait for the writer thread to finish
+        writer.join().expect("couldn't join on the writer thread")?;
+
+        // finish the progress bar
+
+        info!("All simulations have been run successfully");
 
         Ok(())
+    }
+
+    // writer thread function
+    // receives dataframes from the worker threads and writes them to disk in batches
+    fn writer(
+        &self,
+        receiver: Receiver<(usize, LazyFrame)>,
+    ) -> impl FnOnce() -> std::result::Result<(), eyre::Error> + 'static {
+        // duplicate to not borrow self
+        let write_every = self.write_every;
+        let output_dir = self.output_dir.clone();
+
+        fn write(mut df: DataFrame, file_counter: usize, output_directory: PathBuf) -> Result<()> {
+            let path = output_directory.join(format!("output_{}.parquet", file_counter));
+            let file = fs::File::create(&path).map_err(|e| {
+                eyre::eyre!("Failed to create output file {}: {}", path.display(), e)
+            })?;
+            info!("Begin writing output to file: {}", path.display());
+
+            ParquetWriter::new(file).finish(&mut df).map_err(|e| {
+                eyre::eyre!(
+                    "Failed to write parquet output to {}: {}",
+                    path.display(),
+                    e
+                )
+            })?;
+
+            info!("Finished writing output to file: {}", path.display());
+            Ok(())
+        }
+
+        move || -> Result<()> {
+            debug!("Starting writer thread");
+
+            // create the output directory if it does not exist
+            if !output_dir.exists() {
+                debug!("Creating output directory: {}", output_dir.display());
+                std::fs::create_dir_all(&output_dir).map_err(|e| {
+                    eyre::eyre!(
+                        "Failed to create output directory {}: {}",
+                        output_dir.display(),
+                        e
+                    )
+                })?;
+            }
+
+            // counter for output file names
+            let mut file_counter: usize = 0;
+            let mut queue: VecDeque<LazyFrame> = VecDeque::with_capacity(write_every);
+
+            for (_, d) in receiver {
+                // push the dataframe to the queue
+                queue.push_back(d);
+
+                // if the queue is full, write the data to disk
+                if queue.len() >= write_every {
+                    // create the dataframe
+                    let to_write: Vec<LazyFrame> = queue.drain(0..write_every).collect();
+                    // concatenate the dataframes
+                    let d_combined = concat(to_write, UnionArgs::default())
+                        .map_err(|e| eyre::eyre!("Failed to concatenate dataframes: {}", e))?
+                        .collect()
+                        .map_err(|e| eyre::eyre!("Failed to collect LazyFrames: {}", e))?;
+
+                    write(d_combined, file_counter, output_dir.clone())?;
+
+                    file_counter += 1;
+                }
+            }
+
+            // write the remaining data to disk
+            if !queue.is_empty() {
+                let to_write: Vec<LazyFrame> = queue.drain(..).collect();
+                let d_combined = concat(to_write, UnionArgs::default())
+                    .map_err(|e| eyre::eyre!("Failed to concatenate dataframes: {}", e))?
+                    .collect()
+                    .map_err(|e| eyre::eyre!("Failed to collect LazyFrames: {}", e))?;
+
+                write(d_combined, file_counter, output_dir)?;
+            }
+
+            Ok(())
+        }
+    }
+
+    // rayon worker function
+    // runs SLiM and packages the output into an annotated dataframe
+    fn worker(
+        pb: &ProgressBar,
+    ) -> impl Fn(&mut Sender<(usize, LazyFrame)>, IteratorOutput) -> Result<()> {
+        let pb: ProgressBar = pb.clone();
+        move |s, (i, num_ann, str_ann, mut command)| {
+            // run SLiM
+            // debug!("Running command for iteration {:?}", i);
+            let output = command.output().map_err(|e| {
+                debug!("Failed to execute SLiM command: {}", e);
+                eyre::eyre!("Failed to execute SLiM command: {}", e)
+            })?;
+
+            if !output.status.success() {
+                return Err(eyre::eyre!(
+                    "SLiM command failed with exit code {}: {}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr)
+                ));
+            }
+
+            // parse the csv output from SLiM
+            // debug!("reading csv output from SLiM for iteration {:?}", i);
+            let mut d = CsvReader::new(Cursor::new(&output.stdout))
+                .finish()
+                .map_err(|e| {
+                    debug!("Failed to read SLiM output: {}", e);
+                    eyre::eyre!("Failed to parse SLiM output into a table: {}", e)
+                })?
+                .lazy();
+
+            // debug!("annotating dataframe for iteration {:?}", i);
+            // add numerical annotations
+            d = d.with_columns(
+                num_ann
+                    .iter()
+                    .map(|(k, v)| lit(*v).alias(k))
+                    .collect::<Vec<_>>(),
+            );
+
+            // make replicate into an integer column
+            d = d.with_column(col("replicate").cast(DataType::Int64));
+
+            // add string annotations if there are any
+            d = if str_ann.is_empty() {
+                d
+            } else {
+                d.with_columns(
+                    str_ann
+                        .iter()
+                        .map(|(k, v)| lit(v.clone()).alias(k))
+                        .collect::<Vec<_>>(),
+                )
+            };
+
+            // send the dataframe to the channel
+            // debug!("sending dataframe for iteration {:?}", i);
+            s.send((i, d))
+                .map_err(|e| eyre::eyre!("Failed to send dataframe to writer channel: {}", e))?;
+
+            // update the progress bar
+            pb.inc(1);
+            // doing great!
+            Ok(())
+        }
     }
 }

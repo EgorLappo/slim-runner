@@ -19,10 +19,10 @@ initialize() {
 }
 
 1 early() {
-  sim.addSubpop("p1", N);
+  sim.addSubpop("p1", asInteger(N));
 
   // Log Files
-  log = community.createLogFile(outfile, logInterval=10);
+  log = community.createLogFile(outfile, logInterval=10, flushInterval=1000);
   log.addCycle();
   log.addMeanSDColumns('k', 'sim.subpopulations.individuals.countOfMutationsOfType(m1);');
 }

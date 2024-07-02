@@ -1873,6 +1873,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "color-eyre",
+ "crossbeam-channel",
  "env_logger",
  "indicatif",
  "indicatif-log-bridge",

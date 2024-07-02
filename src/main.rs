@@ -23,8 +23,8 @@ fn main() -> Result<()> {
     color_eyre::install()?;
     let logger =
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).build();
-    let multi_bar = MultiProgress::new();
-    indicatif_log_bridge::LogWrapper::new(multi_bar.clone(), logger)
+    let bar = MultiProgress::new();
+    indicatif_log_bridge::LogWrapper::new(bar.clone(), logger)
         .try_init()
         .unwrap();
 
@@ -32,7 +32,6 @@ fn main() -> Result<()> {
 
     info!("Starting SLiM grid run with config: {:?}", opts.config);
 
-    let grid = Grid::new(opts.config).unwrap();
-
-    grid.run(multi_bar.clone())
+    let grid = Grid::new(opts.config)?;
+    grid.run(bar)
 }
