@@ -1,6 +1,6 @@
 ## `SLiM` simulation wrapper
 
-This is a small program to wrap SLiM grid runs. It targets cases in which per-cycle output is the primary output of the simulation. Any `.csv`-like output is automatically consumed by this wrapper, annotated with parameter values, and batched into larger files. With shorter simulations, this saves a lot of time spent on disk writes and compression.
+This is a small program to wrap SLiM grid runs. It targets cases in which __per-cycle, tabular output__ is the primary output of the simulation. Any `.csv`-like output is automatically consumed by this wrapper, annotated with parameter values, and batched into larger files. With shorter simulations, this saves a lot of time spent on disk writes and compression.
 
 Output is written as a sequence of parquet files `output_{i}.parquet`. Many parquet readers know how to treat a directory as a single big parquet file.
 
