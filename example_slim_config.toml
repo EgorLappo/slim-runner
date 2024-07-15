@@ -16,7 +16,7 @@ annotate = true
 # only run first `limit' simulations (for debugging purposes)
 # limit = 100
 # custom slim executable path (also can be set with $SLIM_EXE environment variable)
-# slim_exe = "/path/to/slim"
+# slim_executable = "/usr/locl/bin/slim"
 
 [grid]
 N = [500, 1000, 2000, 5000]
