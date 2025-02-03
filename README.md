@@ -1,6 +1,6 @@
 ## `SLiM` simulation wrapper
 
-This is a small program to wrap SLiM grid runs. It targets cases in which __per-cycle, tabular output__ is the primary output of the simulation. Any `.csv`-like output is automatically consumed by this wrapper, annotated with parameter values, and batched into larger files. With shorter simulations, this saves a lot of time spent on disk writes and compression.
+This is a small program to wrap SLiM grid runs. It targets cases in which __per-cycle, tabular output__ is the primary output of the simulation. Any `.csv`-like output is automatically consumed by this wrapper, annotated with parameter values, and batched into larger files. With shorter simulations, this saves a lot of time spent on disk writes and compression. The program also is able to run many instances of SLiM in parallel, speeding up simulations over large parameter grids.
 
 Output is written as a sequence of parquet files `output_{i}.parquet`. Many parquet readers know how to treat a directory as a single big parquet file.
 
@@ -47,7 +47,7 @@ replicates = 10
 script = "example_script.slim"
 # output directory
 output_dir = "output"
-# number of cores to use for simultaneously running many instances of SLiM (optional, defaults to 1)
+# number of parallel instances of SLiM to use (optional, defaults to 1)
 cores = 6
 # interval to write output to disk in parameter sets (optional, defaults to 100)
 write_every = 1000

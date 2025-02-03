@@ -381,12 +381,11 @@ impl Grid {
             .collect::<Result<Vec<_>>>()
             .map_err(|e| eyre::eyre!("Failed to run SLiM commands: {}", e))?;
 
+        // finish the progress bar
         pb.finish();
 
         // wait for the writer thread to finish
         writer.join().expect("couldn't join on the writer thread")?;
-
-        // finish the progress bar
 
         info!("All simulations have been run successfully");
 
