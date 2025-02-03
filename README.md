@@ -47,7 +47,7 @@ replicates = 10
 script = "example_script.slim"
 # output directory
 output_dir = "output"
-# number of threads to use (optional, defaults to 1)
+# number of cores to use for simultaneously running many instances of SLiM (optional, defaults to 1)
 cores = 6
 # interval to write output to disk in parameter sets (optional, defaults to 100)
 write_every = 1000
