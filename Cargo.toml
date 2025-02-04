@@ -2,6 +2,11 @@
 name = "slim-runner"
 version = "0.1.1"
 edition = "2021"
+authors = ["Egor Lappo <elappo@stanford.edu>"]
+description = "Run SLiM simulation grid runs in parallel"
+readme = "README.md"
+repository = "https://github.com/EgorLappo/slim-runner"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 indicatif-log-bridge = "0.2.3"
@@ -21,6 +26,5 @@ polars = { version = "0.41.3", features = [
 rand = { version = "0.8.5", features = ["small_rng"] }
 rayon = "1.10.0"
 serde = { version = "1.0.217", features = ["derive"] }
-# smallstring = "0.1.2"
 toml = "0.8.19"
 crossbeam-channel = "0.5.14"
