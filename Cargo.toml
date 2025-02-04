@@ -4,15 +4,15 @@ version = "0.1.1"
 edition = "2021"
 
 [dependencies]
-indicatif-log-bridge = "0.2.2"
-clap = { version = "4.5.8", features = ["derive"] }
-indicatif = { version = "0.17.8", features = ["improved_unicode"] }
+indicatif-log-bridge = "0.2.3"
+clap = { version = "4.5.28", features = ["derive"] }
+indicatif = { version = "0.17.11", features = ["improved_unicode"] }
 color-eyre = "0.6.3"
-env_logger = "0.11.3"
+env_logger = "0.11.6"
 itertools = "0.13.0"
 jemallocator = "0.5.4"
-log = "0.4.22"
-polars = { version = "0.41.2", features = [
+log = "0.4.25"
+polars = { version = "0.41.3", features = [
     "performant",
     "lazy",
     "parquet",
@@ -20,7 +20,7 @@ polars = { version = "0.41.2", features = [
 ] }
 rand = { version = "0.8.5", features = ["small_rng"] }
 rayon = "1.10.0"
-serde = { version = "1.0.203", features = ["derive"] }
+serde = { version = "1.0.217", features = ["derive"] }
 # smallstring = "0.1.2"
-toml = "0.8.14"
-crossbeam-channel = "0.5.13"
+toml = "0.8.19"
+crossbeam-channel = "0.5.14"
