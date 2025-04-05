@@ -1,12 +1,10 @@
-use color_eyre::eyre::{self, Result};
-use crossbeam_channel::{Receiver, Sender};
+use color_eyre::eyre::{self, Result, WrapErr};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use itertools::{Itertools, MultiProduct};
 use log::{debug, info};
 use polars::prelude::*;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
-use rayon::prelude::*;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -16,6 +14,8 @@ use std::io::Cursor;
 use std::iter::Iterator;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::mpsc;
+use threadpool::ThreadPool;
 
 #[derive(Debug, Deserialize)]
 struct GridConfig {
@@ -253,18 +253,16 @@ pub struct Grid {
 
 impl Grid {
     pub fn new<P: AsRef<Path> + Clone>(config_file: P) -> Result<Self> {
-        let config = std::fs::read_to_string(&config_file).map_err(|e| {
-            eyre::eyre!(
-                "Failed to read config file {}: {}",
-                config_file.as_ref().display(),
-                e
+        let config = std::fs::read_to_string(&config_file).wrap_err_with(|| {
+            format!(
+                "Failed to read config file {}",
+                config_file.as_ref().display()
             )
         })?;
-        let config: GridConfig = toml::from_str(&config).map_err(|e| {
-            eyre::eyre!(
-                "Failed to parse config file {}: {}",
+        let config: GridConfig = toml::from_str(&config).wrap_err_with(|| {
+            format!(
+                "Failed to parse config file {}",
                 config_file.as_ref().display(),
-                e
             )
         })?;
 
@@ -345,7 +343,7 @@ impl Grid {
             string_parameters,
             num_parameters,
         )
-        .map_err(|e| eyre::eyre!("Failed to initialize CommandIterator: {}", e))?;
+        .wrap_err("Failed to initialize CommandIterator")?;
 
         Ok(Self {
             cores,
@@ -358,7 +356,7 @@ impl Grid {
 
     pub fn run(self, bar: MultiProgress) -> Result<()> {
         // first, set the envvar for rayon to limit the number of threads
-        env::set_var("RAYON_NUM_THREADS", self.cores.to_string());
+        // env::set_var("RAYON_NUM_THREADS", self.cores.to_string());
 
         // draw the progress bar
         let pb = bar.add(ProgressBar::new(self.total_runs as u64));
@@ -368,18 +366,45 @@ impl Grid {
         .unwrap();
         pb.set_style(style);
 
-        let (sender, receiver) = crossbeam_channel::unbounded();
+        // let (sender, receiver) = crossbeam_channel::unbounded();
+        let (wrt_sender, wrt_receiver) = mpsc::channel();
         // spawn the "writer" thread that will write the output to disk
-        let writer = std::thread::spawn(self.writer(receiver));
+        let writer = std::thread::spawn(self.writer(wrt_receiver));
+
+        let pool = ThreadPool::with_name("slim_worker".into(), self.cores);
+        let (pool_sender, pool_receiver) = mpsc::channel();
 
         // run the commands in parallel with rayon
-        self.command_iter
-            .par_bridge()
-            // each work unit gets a reference to the sender for the channel
-            // at the end, the complete dataframe is sent to the channel
-            .map_with(sender, Grid::worker(&pb))
-            .collect::<Result<Vec<_>>>()
-            .map_err(|e| eyre::eyre!("Failed to run SLiM commands: {}", e))?;
+        // self.command_iter
+        //     .par_bridge()
+        //     // each work unit gets a reference to the sender for the channel
+        //     // at the end, the complete dataframe is sent to the channel
+        //     .map_with(sender, Grid::worker(&pb))
+        //     .collect::<Result<Vec<_>>>()
+        //     .map_err(|e| eyre::eyre!("Failed to run SLiM commands: {}", e))?;
+
+        let mut n_jobs: usize = 0;
+
+        for cmd in self.command_iter {
+            let idx = cmd.0;
+            let wrt_sender = wrt_sender.clone();
+            let pool_sender = pool_sender.clone();
+            let worker = Grid::worker(&pb);
+            pool.execute(move || {
+                let result = worker(wrt_sender, cmd);
+                pool_sender
+                    .send(result)
+                    .expect("there should be a channel waiting to receive a result");
+            });
+
+            debug!("spawned slim command idx={idx}");
+
+            n_jobs += 1;
+        }
+
+        for result in pool_receiver.iter().take(n_jobs) {
+            let _ = result?;
+        }
 
         // finish the progress bar
         pb.finish();
@@ -396,7 +421,7 @@ impl Grid {
     // receives dataframes from the worker threads and writes them to disk in batches
     fn writer(
         &self,
-        receiver: Receiver<(usize, LazyFrame)>,
+        receiver: mpsc::Receiver<(usize, LazyFrame)>,
     ) -> impl FnOnce() -> std::result::Result<(), eyre::Error> + 'static {
         // duplicate to not borrow self
         let write_every = self.write_every;
@@ -404,17 +429,13 @@ impl Grid {
 
         fn write(mut df: DataFrame, file_counter: usize, output_directory: PathBuf) -> Result<()> {
             let path = output_directory.join(format!("output_{}.parquet", file_counter));
-            let file = fs::File::create(&path).map_err(|e| {
-                eyre::eyre!("Failed to create output file {}: {}", path.display(), e)
-            })?;
+            let file = fs::File::create(&path)
+                .wrap_err_with(|| format!("Failed to create output file {}", path.display()))?;
+
             info!("Begin writing output to file: {}", path.display());
 
-            ParquetWriter::new(file).finish(&mut df).map_err(|e| {
-                eyre::eyre!(
-                    "Failed to write parquet output to {}: {}",
-                    path.display(),
-                    e
-                )
+            ParquetWriter::new(file).finish(&mut df).wrap_err_with(|| {
+                format!("Failed to write parquet output to {}", path.display())
             })?;
 
             info!("Finished writing output to file: {}", path.display());
@@ -427,12 +448,8 @@ impl Grid {
             // create the output directory if it does not exist
             if !output_dir.exists() {
                 debug!("Creating output directory: {}", output_dir.display());
-                std::fs::create_dir_all(&output_dir).map_err(|e| {
-                    eyre::eyre!(
-                        "Failed to create output directory {}: {}",
-                        output_dir.display(),
-                        e
-                    )
+                std::fs::create_dir_all(&output_dir).wrap_err_with(|| {
+                    format!("Failed to create output directory {}", output_dir.display())
                 })?;
             }
 
@@ -450,9 +467,9 @@ impl Grid {
                     let to_write: Vec<LazyFrame> = queue.drain(0..write_every).collect();
                     // concatenate the dataframes
                     let d_combined = concat(to_write, UnionArgs::default())
-                        .map_err(|e| eyre::eyre!("Failed to concatenate dataframes: {}", e))?
+                        .wrap_err("Failed to concatenate dataframes: ")?
                         .collect()
-                        .map_err(|e| eyre::eyre!("Failed to collect LazyFrames: {}", e))?;
+                        .wrap_err("Failed to collect LazyFrames")?;
 
                     write(d_combined, file_counter, output_dir.clone())?;
 
@@ -464,9 +481,9 @@ impl Grid {
             if !queue.is_empty() {
                 let to_write: Vec<LazyFrame> = queue.drain(..).collect();
                 let d_combined = concat(to_write, UnionArgs::default())
-                    .map_err(|e| eyre::eyre!("Failed to concatenate dataframes: {}", e))?
+                    .wrap_err("Failed to concatenate dataframes")?
                     .collect()
-                    .map_err(|e| eyre::eyre!("Failed to collect LazyFrames: {}", e))?;
+                    .wrap_err("Failed to collect LazyFrames")?;
 
                 write(d_combined, file_counter, output_dir)?;
             }
@@ -479,15 +496,14 @@ impl Grid {
     // runs SLiM and packages the output into an annotated dataframe
     fn worker(
         pb: &ProgressBar,
-    ) -> impl Fn(&mut Sender<(usize, LazyFrame)>, IteratorOutput) -> Result<()> {
+    ) -> impl Fn(mpsc::Sender<(usize, LazyFrame)>, IteratorOutput) -> Result<()> {
         let pb: ProgressBar = pb.clone();
         move |s, (i, num_ann, str_ann, mut command)| {
             // run SLiM
             // debug!("Running command for iteration {:?}", i);
-            let output = command.output().map_err(|e| {
-                debug!("Failed to execute SLiM command: {}", e);
-                eyre::eyre!("Failed to execute SLiM command: {}", e)
-            })?;
+            let output = command
+                .output()
+                .wrap_err("Failed to execute SLiM command")?;
 
             if !output.status.success() {
                 return Err(eyre::eyre!(
@@ -501,10 +517,7 @@ impl Grid {
             // debug!("reading csv output from SLiM for iteration {:?}", i);
             let mut d = CsvReader::new(Cursor::new(&output.stdout))
                 .finish()
-                .map_err(|e| {
-                    debug!("Failed to read SLiM output: {}", e);
-                    eyre::eyre!("Failed to parse SLiM output into a table: {}", e)
-                })?
+                .wrap_err("Failed to parse SLiM output into a table")?
                 .lazy();
 
             // debug!("annotating dataframe for iteration {:?}", i);
@@ -534,7 +547,7 @@ impl Grid {
             // send the dataframe to the channel
             // debug!("sending dataframe for iteration {:?}", i);
             s.send((i, d))
-                .map_err(|e| eyre::eyre!("Failed to send dataframe to writer channel: {}", e))?;
+                .expect("Failed to send dataframe to writer channel");
 
             // update the progress bar
             pb.inc(1);
