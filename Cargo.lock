@@ -2082,7 +2082,6 @@ dependencies = [
  "log",
  "polars",
  "rand 0.9.0",
- "rayon",
  "serde",
  "threadpool",
  "toml",

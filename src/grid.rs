@@ -374,19 +374,8 @@ impl Grid {
         let pool = ThreadPool::with_name("slim_worker".into(), self.cores);
         let (pool_sender, pool_receiver) = mpsc::channel();
 
-        // run the commands in parallel with rayon
-        // self.command_iter
-        //     .par_bridge()
-        //     // each work unit gets a reference to the sender for the channel
-        //     // at the end, the complete dataframe is sent to the channel
-        //     .map_with(sender, Grid::worker(&pb))
-        //     .collect::<Result<Vec<_>>>()
-        //     .map_err(|e| eyre::eyre!("Failed to run SLiM commands: {}", e))?;
-
-        let mut n_jobs: usize = 0;
-
+        // run the commands in parallel with the threadpool
         for cmd in self.command_iter {
-            let idx = cmd.0;
             let wrt_sender = wrt_sender.clone();
             let pool_sender = pool_sender.clone();
             let worker = Grid::worker(&pb);
@@ -396,15 +385,13 @@ impl Grid {
                     .send(result)
                     .expect("there should be a channel waiting to receive a result");
             });
-
-            debug!("spawned slim command idx={idx}");
-
-            n_jobs += 1;
         }
 
-        for result in pool_receiver.iter().take(n_jobs) {
+        for result in pool_receiver.iter().take(self.total_runs) {
             let _ = result?;
         }
+
+        drop(wrt_sender);
 
         // finish the progress bar
         pb.finish();
