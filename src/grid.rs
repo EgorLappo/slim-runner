@@ -198,7 +198,7 @@ impl Iterator for CommandIterator {
         command.arg("-d").arg("outfile='/dev/stdout'");
 
         // add seed
-        command.arg("-s").arg(self.rng.gen::<u64>().to_string());
+        command.arg("-s").arg(self.rng.random::<u64>().to_string());
 
         // add string parameters
         for (name, value) in &self.string_parameters {
