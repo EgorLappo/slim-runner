@@ -86,7 +86,7 @@ impl Range {
 
 // CommandIterator wraps the underlying MultiProd iterator
 // to generate new slim commands on demand
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CommandIterator {
     slim_executable: PathBuf,
     slim_script: PathBuf,
@@ -248,11 +248,15 @@ pub struct Grid {
     output_dir: PathBuf,
     write_every: usize,
     total_runs: usize,
+    chunking: Option<(usize, usize)>,
     command_iter: CommandIterator,
 }
 
 impl Grid {
-    pub fn new<P: AsRef<Path> + Clone>(config_file: P) -> Result<Self> {
+    pub fn new<P: AsRef<Path> + Clone>(
+        config_file: P,
+        chunking: Option<(usize, usize)>,
+    ) -> Result<Self> {
         let config = std::fs::read_to_string(&config_file).wrap_err_with(|| {
             format!(
                 "Failed to read config file {}",
@@ -350,16 +354,40 @@ impl Grid {
             output_dir: config.settings.output_dir,
             write_every,
             total_runs,
+            chunking,
             command_iter,
         })
     }
 
     pub fn run(self, bar: MultiProgress) -> Result<()> {
-        // first, set the envvar for rayon to limit the number of threads
-        // env::set_var("RAYON_NUM_THREADS", self.cores.to_string());
+        // first, figure out if we need to skip some commands due to chunking
+        let (skip, take) = if let Some((nchunks, chunk)) = self.chunking {
+            let chunk_len = (self.total_runs as f64) / (nchunks as f64);
+            let chunk_len = chunk_len.ceil() as usize;
+
+            let skip = chunk * chunk_len;
+            let take = if (chunk + 1) * chunk_len > self.total_runs {
+                self.total_runs - skip
+            } else {
+                chunk_len
+            };
+
+            debug!(
+                "Chunking: starting with run {} and doing {} runs",
+                skip + 1,
+                take
+            );
+            (skip, take)
+        } else {
+            debug!(
+                "No chunking: starting with run {} and doing all {} runs",
+                0, self.total_runs
+            );
+            (0, self.total_runs)
+        };
 
         // draw the progress bar
-        let pb = bar.add(ProgressBar::new(self.total_runs as u64));
+        let pb = bar.add(ProgressBar::new(take as u64));
         let style = ProgressStyle::with_template(
             "{spinner:.purple} [{elapsed}/{duration}] [{bar:.cyan/blue}] {human_pos}/{human_len}",
         )
@@ -376,19 +404,23 @@ impl Grid {
 
         // run the commands in parallel with the threadpool
         for cmd in self.command_iter {
-            let wrt_sender = wrt_sender.clone();
-            let pool_sender = pool_sender.clone();
-            let worker = Grid::worker(&pb);
-            pool.execute(move || {
-                let result = worker(wrt_sender, cmd);
-                pool_sender
-                    .send(result)
-                    .expect("there should be a channel waiting to receive a result");
-            });
+            if (cmd.0 >= skip) & (cmd.0 < skip + take) {
+                let wrt_sender = wrt_sender.clone();
+                let pool_sender = pool_sender.clone();
+                let worker = Grid::worker(&pb);
+                pool.execute(move || {
+                    let result = worker(wrt_sender, cmd);
+                    pool_sender
+                        .send(result)
+                        .expect("there should be a channel waiting to receive a result");
+                });
+            } else if cmd.0 >= (skip + take) {
+                break;
+            }
         }
 
-        for result in pool_receiver.iter().take(self.total_runs) {
-            let _ = result?;
+        for result in pool_receiver.iter().take(take) {
+            result?;
         }
 
         drop(wrt_sender);
