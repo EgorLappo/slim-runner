@@ -444,7 +444,10 @@ impl Grid {
     ) -> impl FnOnce() -> std::result::Result<(), eyre::Error> + 'static {
         // duplicate to not borrow self
         let write_every = self.write_every;
-        let output_dir = self.output_dir.clone();
+        let mut output_dir = self.output_dir.clone();
+        if let Some((_, chunk)) = self.chunking {
+            output_dir.push(format!("chunk_{}", chunk));
+        }
 
         fn write(mut df: DataFrame, file_counter: usize, output_directory: PathBuf) -> Result<()> {
             let path = output_directory.join(format!("output_{}.parquet", file_counter));
@@ -526,9 +529,10 @@ impl Grid {
 
             if !output.status.success() {
                 return Err(eyre::eyre!(
-                    "SLiM command failed with exit code {}: {}",
+                    "SLiM command failed with exit code {}: {}\nCommand: {:?}",
                     output.status,
-                    String::from_utf8_lossy(&output.stderr)
+                    String::from_utf8_lossy(&output.stderr),
+                    command
                 ));
             }
 
