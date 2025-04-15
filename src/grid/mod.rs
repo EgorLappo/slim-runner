@@ -1,10 +1,7 @@
 use color_eyre::eyre::{self, Result, WrapErr};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use itertools::{Itertools, MultiProduct};
 use log::{debug, info};
 use polars::prelude::*;
-use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -13,9 +10,11 @@ use std::fs;
 use std::io::Cursor;
 use std::iter::Iterator;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::mpsc;
 use threadpool::ThreadPool;
+
+mod cmditer;
+use cmditer::{CommandIterator, IteratorOutput};
 
 #[derive(Debug, Deserialize)]
 struct GridConfig {
@@ -34,6 +33,7 @@ struct Settings {
     annotate: Option<bool>,
     write_every: Option<usize>,
     limit: Option<usize>,
+    custom_script: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,165 +84,6 @@ impl Range {
     }
 }
 
-// CommandIterator wraps the underlying MultiProd iterator
-// to generate new slim commands on demand
-#[derive(Debug, Clone)]
-pub struct CommandIterator {
-    slim_executable: PathBuf,
-    slim_script: PathBuf,
-    rng: SmallRng,
-    replicates: usize,
-    current_replicate: usize,
-    current_iteration: usize,
-    limit: Option<usize>,
-    annotate: bool,
-    num_keys: Vec<String>,
-    current_parameters: HashMap<String, f64>,
-    // this stores the current numerical parameters
-    string_parameters: Vec<(String, String)>,
-    // this should store the current state of the iterator
-    num_cartprod: MultiProduct<std::vec::IntoIter<f64>>,
-}
-
-impl CommandIterator {
-    #[allow(clippy::too_many_arguments)] // it's okay since it's only used once
-    fn init(
-        slim_executable: PathBuf,
-        slim_script: PathBuf,
-        seed: usize,
-        replicates: usize,
-        annotate: bool,
-        limit: Option<usize>,
-        string_parameters: HashMap<String, String>,
-        num_parameters: HashMap<String, Vec<f64>>,
-    ) -> Result<Self> {
-        let rng = SmallRng::seed_from_u64(seed as u64);
-
-        let num_keys: Vec<String> = num_parameters.keys().cloned().collect();
-
-        let values: Vec<Vec<f64>> = num_parameters.values().cloned().collect();
-        let mut num_cartprod = values.into_iter().multi_cartesian_product();
-
-        // unwrap or signal empty with error
-        let current_parameters = num_cartprod
-            .next()
-            .ok_or_else(|| eyre::eyre!("Provided parameter set is empty"))?;
-
-        let current_parameters = num_keys
-            .iter()
-            .zip(current_parameters)
-            .map(|(k, v)| (k.clone(), v))
-            .collect();
-
-        // sort string parameters by key
-        let string_parameters = string_parameters
-            .into_iter()
-            .sorted_by(|(k1, _), (k2, _)| k1.cmp(k2))
-            .collect();
-
-        Ok(Self {
-            slim_executable,
-            slim_script,
-            rng,
-            current_replicate: 0,
-            current_iteration: 0,
-            limit,
-            annotate,
-            replicates,
-            num_keys,
-            current_parameters,
-            string_parameters,
-            num_cartprod,
-        })
-    }
-}
-
-type StrAnnotation = Vec<(String, String)>;
-type NumAnnotation = Vec<(String, f64)>;
-type IteratorOutput = (usize, NumAnnotation, StrAnnotation, Command);
-
-// the iterator returns Strings that are valid calls to slim
-impl Iterator for CommandIterator {
-    type Item = IteratorOutput;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        // if limit is set, check if we have reached it
-        if let Some(k) = self.limit {
-            if self.current_iteration > k {
-                return None;
-            }
-        }
-
-        // obtain new parameters if we have exhausted the replicates
-        if self.current_replicate >= self.replicates {
-            if let Some(new_parameters) = self.num_cartprod.next() {
-                self.current_parameters = self
-                    .num_keys
-                    .iter()
-                    .zip(new_parameters)
-                    .map(|(k, v)| (k.clone(), v))
-                    .collect();
-                self.current_replicate = 0;
-            } else {
-                return None;
-            }
-        }
-
-        // now we are guaranteed to have parameters
-        let mut command = Command::new(&self.slim_executable);
-
-        // add -l 0 to suppress output
-        command.arg("-l").arg("0");
-
-        // add -d to specify stdout output
-        command.arg("-d").arg("outfile='/dev/stdout'");
-
-        // add seed
-        command.arg("-s").arg(self.rng.random::<u64>().to_string());
-
-        // add string parameters
-        for (name, value) in &self.string_parameters {
-            command.arg("-d").arg(format!("{}='{}'", name, value));
-        }
-
-        // add numerical parameters
-        for (name, value) in &self.current_parameters {
-            command.arg("-d").arg(format!("{}={}", name, value));
-        }
-
-        // add script
-        command.arg(&self.slim_script);
-
-        // build annotations
-        let mut num_annotation = vec![(String::from("replicate"), self.current_replicate as f64)];
-        if self.annotate {
-            for (name, value) in &self.current_parameters {
-                num_annotation.push((name.clone(), *value));
-            }
-        }
-        let str_annotation = self.string_parameters.clone();
-
-        // sort annotations by key
-        num_annotation = num_annotation
-            .into_iter()
-            .sorted_by(|(k1, _), (k2, _)| k1.cmp(k2))
-            .collect();
-
-        let output = (
-            self.current_iteration,
-            num_annotation,
-            str_annotation,
-            command,
-        );
-
-        self.current_replicate += 1;
-        self.current_iteration += 1;
-
-        Some(output)
-    }
-}
-
-#[derive(Debug)]
 pub struct Grid {
     cores: usize,
     output_dir: PathBuf,
@@ -340,6 +181,7 @@ impl Grid {
         let command_iter = CommandIterator::init(
             slim_executable,
             config.settings.script,
+            config.settings.custom_script,
             seed,
             replicates,
             annotate,
@@ -404,6 +246,7 @@ impl Grid {
 
         // run the commands in parallel with the threadpool
         for cmd in self.command_iter {
+            let cmd = cmd.wrap_err("generating SLiM command failed")?;
             if (cmd.0 >= skip) & (cmd.0 < skip + take) {
                 let wrt_sender = wrt_sender.clone();
                 let pool_sender = pool_sender.clone();
@@ -419,6 +262,7 @@ impl Grid {
             }
         }
 
+        // await completion of all runs, check whether all are successful
         for result in pool_receiver.iter().take(take) {
             result?;
         }
