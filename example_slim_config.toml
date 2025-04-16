@@ -14,9 +14,11 @@ write_every = 1000
 # annotate the output log files with parameter values
 annotate = true
 # only run first `limit' simulations (for debugging purposes)
-# limit = 100
+limit = 100
 # custom slim executable path (also can be set with $SLIM_EXE environment variable)
 # slim_executable = "/usr/locl/bin/slim"
+# custom script to generate new parameters from ones in the grid
+custom_script = "example_custom_script.scm"
 
 [grid]
 N = [500, 1000, 2000, 5000]

@@ -70,7 +70,14 @@ impl SteelEngine {
         Ok(SteelEngine { vm, script })
     }
 
-    fn run(&mut self, current_parameters: &HashMap<String, f64>) -> Result<HashMap<String, f64>> {
+    fn run(
+        &mut self,
+        current_replicate: usize,
+        current_parameters: &HashMap<String, f64>,
+    ) -> Result<HashMap<String, f64>> {
+        self.vm
+            .register_external_value("replicate", current_replicate)
+            .unwrap();
         for (name, value) in current_parameters.iter() {
             self.vm.register_external_value(name, *value).unwrap();
         }
@@ -203,6 +210,17 @@ impl Iterator for CommandIterator {
             }
         }
 
+        // build annotations
+        // note: have to do this before building up the command
+        //       to possibly save generated parameters from the custom script
+        let mut num_annotation = vec![(String::from("replicate"), self.current_replicate as f64)];
+        if self.annotate {
+            for (name, value) in &self.current_parameters {
+                num_annotation.push((name.clone(), *value));
+            }
+        }
+        let str_annotation = self.string_parameters.clone();
+
         // now we are guaranteed to have parameters
         let mut command = Command::new(&self.slim_executable);
 
@@ -228,11 +246,13 @@ impl Iterator for CommandIterator {
         // run the steel interpreter if we have to
         if let Some(e) = self.engine.as_mut() {
             // run and check output
-            match e.run(&self.current_parameters) {
+            match e.run(self.current_replicate, &self.current_parameters) {
                 // if ok, add all parameters as above
                 Ok(hm) => {
                     for (name, value) in hm {
                         command.arg("-d").arg(format!("{}={}", name, value));
+                        // also save parameters for annotating
+                        num_annotation.push((name, value));
                     }
                 }
                 // if run failed, signal
@@ -242,16 +262,7 @@ impl Iterator for CommandIterator {
         // add script
         command.arg(&self.slim_script);
 
-        // build annotations
-        let mut num_annotation = vec![(String::from("replicate"), self.current_replicate as f64)];
-        if self.annotate {
-            for (name, value) in &self.current_parameters {
-                num_annotation.push((name.clone(), *value));
-            }
-        }
-        let str_annotation = self.string_parameters.clone();
-
-        // sort annotations by key
+        // sort annotations by key before returning
         num_annotation = num_annotation
             .into_iter()
             .sorted_by(|(k1, _), (k2, _)| k1.cmp(k2))

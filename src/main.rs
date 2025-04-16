@@ -16,7 +16,7 @@ use grid::Grid;
 #[command(author, version, about = "Launch SLiM grid runs", long_about = None)]
 struct Opts {
     #[arg(
-        value_name = "PATH",
+        value_name = "CONFIG_PATH",
         default_value = "slim_config.toml",
         help = "config TOML file"
     )]
