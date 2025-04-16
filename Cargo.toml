@@ -1,6 +1,6 @@
 [package]
 name = "slim-runner"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 authors = ["Egor Lappo <elappo@stanford.edu>"]
 description = "Run SLiM simulation grid runs in parallel"

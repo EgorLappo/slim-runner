@@ -36,6 +36,31 @@ struct SteelEngine {
     script: String,
 }
 
+#[derive(Clone, Debug, Steel)]
+struct SteelRng {
+    rng: SmallRng,
+}
+
+impl SteelRng {
+    fn new(seed: u64) -> Self {
+        SteelRng {
+            rng: SmallRng::seed_from_u64(seed),
+        }
+    }
+
+    fn random_uniform(mut self) -> f64 {
+        self.rng.random()
+    }
+
+    fn random_range_float(mut self, min: f64, max: f64) -> f64 {
+        self.rng.random_range(min..max)
+    }
+
+    fn random_range_int(mut self, min: i64, max: i64) -> i64 {
+        self.rng.random_range(min..max)
+    }
+}
+
 fn extract_last<T>(output: &[SteelVal]) -> Result<T>
 where
     T: FromSteelVal,
@@ -51,9 +76,11 @@ impl SteelEngine {
         })?;
 
         let mut vm = Engine::new_sandboxed();
+
+        // registed code for consuming new parameters
         vm.register_fn("parameter", SteelParameter::new);
 
-        let init_code = r#"
+        let parameter_code = r#"
             (define (force-convert n) (* n 1.0))
         
             (define-syntax parameters
@@ -64,20 +91,31 @@ impl SteelEngine {
                     (cons (parameter (symbol->string (quote a)) (force-convert a)) (parameters b ...))]
             ))
         "#;
-        vm.run(init_code)
-            .wrap_err("error running steel init code")?;
+        vm.run(parameter_code)
+            .wrap_err("error running steel parameter init code")?;
+
+        // register code for random sampling
+        vm.register_fn("new-rng", SteelRng::new);
+        vm.register_fn("random-uniform", SteelRng::random_uniform);
+        vm.register_fn("random-range-float", SteelRng::random_range_float);
+        vm.register_fn("random-range-int", SteelRng::random_range_int);
 
         Ok(SteelEngine { vm, script })
     }
 
     fn run(
         &mut self,
+        current_seed: u64,
         current_replicate: usize,
         current_parameters: &HashMap<String, f64>,
     ) -> Result<HashMap<String, f64>> {
         self.vm
             .register_external_value("replicate", current_replicate)
             .unwrap();
+        self.vm
+            .register_external_value("seed", current_seed)
+            .unwrap();
+
         for (name, value) in current_parameters.iter() {
             self.vm.register_external_value(name, *value).unwrap();
         }
@@ -221,6 +259,9 @@ impl Iterator for CommandIterator {
         }
         let str_annotation = self.string_parameters.clone();
 
+        // get random seed from the "global" rng
+        let seed: u64 = self.rng.random();
+
         // now we are guaranteed to have parameters
         let mut command = Command::new(&self.slim_executable);
 
@@ -231,7 +272,7 @@ impl Iterator for CommandIterator {
         command.arg("-d").arg("outfile='/dev/stdout'");
 
         // add seed
-        command.arg("-s").arg(self.rng.random::<u64>().to_string());
+        command.arg("-s").arg(seed.to_string());
 
         // add string parameters
         for (name, value) in &self.string_parameters {
@@ -246,7 +287,7 @@ impl Iterator for CommandIterator {
         // run the steel interpreter if we have to
         if let Some(e) = self.engine.as_mut() {
             // run and check output
-            match e.run(self.current_replicate, &self.current_parameters) {
+            match e.run(seed, self.current_replicate, &self.current_parameters) {
                 // if ok, add all parameters as above
                 Ok(hm) => {
                     for (name, value) in hm {
