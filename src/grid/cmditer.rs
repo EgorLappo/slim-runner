@@ -1,4 +1,4 @@
-use color_eyre::eyre::{self, Context, Result};
+use color_eyre::eyre::{self, Context, OptionExt, Result};
 use itertools::{Itertools, MultiProduct};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -48,16 +48,19 @@ impl SteelRng {
         }
     }
 
-    fn random_uniform(mut self) -> f64 {
-        self.rng.random()
+    fn random_uniform(mut self) -> (Self, f64) {
+        let val = self.rng.random();
+        (self, val)
     }
 
-    fn random_range_float(mut self, min: f64, max: f64) -> f64 {
-        self.rng.random_range(min..max)
+    fn random_range_float(mut self, min: f64, max: f64) -> (Self, f64) {
+        let val = self.rng.random_range(min..max);
+        (self, val)
     }
 
-    fn random_range_int(mut self, min: i64, max: i64) -> i64 {
-        self.rng.random_range(min..max)
+    fn random_range_int(mut self, min: i64, max: i64) -> (Self, i64) {
+        let val = self.rng.random_range(min..max);
+        (self, val)
     }
 }
 
@@ -65,7 +68,9 @@ fn extract_last<T>(output: &[SteelVal]) -> Result<T>
 where
     T: FromSteelVal,
 {
-    let val = &output[output.len() - 1];
+    let val = output
+        .last()
+        .ok_or_eyre("missing expressions in custom script")?;
     T::from_steelval(val).wrap_err("failed to convert last script expression to parameter vector")
 }
 
@@ -75,7 +80,7 @@ impl SteelEngine {
             format!("error reading custom script file {}", script_file.display())
         })?;
 
-        let mut vm = Engine::new_sandboxed();
+        let mut vm = Engine::new(); //_sandboxed();
 
         // registed code for consuming new parameters
         vm.register_fn("parameter", SteelParameter::new);
@@ -95,10 +100,37 @@ impl SteelEngine {
             .wrap_err("error running steel parameter init code")?;
 
         // register code for random sampling
-        vm.register_fn("new-rng", SteelRng::new);
-        vm.register_fn("random-uniform", SteelRng::random_uniform);
-        vm.register_fn("random-range-float", SteelRng::random_range_float);
-        vm.register_fn("random-range-int", SteelRng::random_range_int);
+        vm.register_fn("rng-uniform", SteelRng::random_uniform);
+        vm.register_fn("rng-range-float", SteelRng::random_range_float);
+        vm.register_fn("rng-range-int", SteelRng::random_range_int);
+
+        let random_code = r#"
+            (define-syntax random-uniform 
+              (syntax-rules () 
+                [(random-uniform) 
+                 (let ([res (rng-uniform rng)]) 
+                   (set! rng (car res)) 
+                   (cadr res))]
+            ))
+            
+            (define-syntax random-range-float
+              (syntax-rules () 
+                [(random-range-float min max) 
+                 (let ([res (rng-range-float rng min max)]) 
+                   (set! rng (car res)) 
+                   (cadr res))]
+            ))
+            
+            (define-syntax random-range-int
+              (syntax-rules () 
+                [(random-range-int min max) 
+                 (let ([res (rng-range-int rng min max)]) 
+                   (set! rng (car res)) 
+                   (cadr res))]
+            ))
+        "#;
+        vm.run(random_code)
+            .wrap_err("error running steel rng init code")?;
 
         Ok(SteelEngine { vm, script })
     }
@@ -112,9 +144,9 @@ impl SteelEngine {
         self.vm
             .register_external_value("replicate", current_replicate)
             .unwrap();
-        self.vm
-            .register_external_value("seed", current_seed)
-            .unwrap();
+
+        let steel_rng = SteelRng::new(current_seed);
+        self.vm.register_external_value("rng", steel_rng).unwrap();
 
         for (name, value) in current_parameters.iter() {
             self.vm.register_external_value(name, *value).unwrap();

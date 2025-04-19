@@ -1,4 +1,6 @@
+use color_eyre::eyre::bail;
 use color_eyre::eyre::{self, Result, WrapErr};
+use core::panic;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{debug, info};
 use polars::prelude::*;
@@ -244,13 +246,34 @@ impl Grid {
         let pool = ThreadPool::with_name("slim_worker".into(), self.cores);
         let (pool_sender, pool_receiver) = mpsc::channel();
 
+        let consumer = std::thread::spawn(move || -> Result<()> {
+            for r in pool_receiver.iter() {
+                r?
+            }
+            Ok(())
+        });
+
         // run the commands in parallel with the threadpool
         for cmd in self.command_iter {
             let cmd = cmd.wrap_err("generating SLiM command failed")?;
             if (cmd.0 >= skip) & (cmd.0 < skip + take) {
+                // first, make sure that previous commands did not panic:
+                if consumer.is_finished() {
+                    // this would trigger only when we sent an Err to consumer,
+                    // as otherwise it would just be blocked on the recv iter (we still hold sender so its not hung up)
+                    match consumer
+                        .join()
+                        .expect("failed to join consumer thread")
+                        .wrap_err("error executing commands in threadpool")
+                    {
+                        Ok(_) => panic!("consumer cannot return early if everythign is okay"),
+                        Err(e) => bail!(e),
+                    }
+                }
+
                 let wrt_sender = wrt_sender.clone();
                 let pool_sender = pool_sender.clone();
-                let worker = Grid::worker(&pb);
+                let worker = Grid::worker(pb.clone());
                 pool.execute(move || {
                     let result = worker(wrt_sender, cmd);
                     pool_sender
@@ -262,18 +285,23 @@ impl Grid {
             }
         }
 
-        // await completion of all runs, check whether all are successful
-        for result in pool_receiver.iter().take(take) {
-            result?;
-        }
-
+        // drop instance of snd in this thread (threadpool may still own some)
+        drop(pool_sender);
         drop(wrt_sender);
 
         // finish the progress bar
         pb.finish();
 
         // wait for the writer thread to finish
-        writer.join().expect("couldn't join on the writer thread")?;
+        writer
+            .join()
+            .expect("couldn't join on the writer thread")
+            .wrap_err("error writing simulation results to disk")?;
+        // wait for consumer to finish
+        consumer
+            .join()
+            .expect("couldn't join consumer thread")
+            .wrap_err("error executing commands in thread pool")?;
 
         info!("All simulations have been run successfully");
 
@@ -361,9 +389,8 @@ impl Grid {
     // rayon worker function
     // runs SLiM and packages the output into an annotated dataframe
     fn worker(
-        pb: &ProgressBar,
+        pb: ProgressBar,
     ) -> impl Fn(mpsc::Sender<(usize, LazyFrame)>, IteratorOutput) -> Result<()> {
-        let pb: ProgressBar = pb.clone();
         move |s, (i, num_ann, str_ann, mut command)| {
             // run SLiM
             // debug!("Running command for iteration {:?}", i);

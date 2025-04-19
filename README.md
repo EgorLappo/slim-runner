@@ -132,7 +132,7 @@ Using this custom script would pass additional arguments `-d x=1.0 -d y=256.0` t
 
 The key part of the script is the last expression: it *must* look like `(parameters a b c ...)` with all newly introduced parameter variables listed in a call to `parameters`. Any number of arguments may be passed. SLiM then would be given access to these arguments under exact same names. Currently, names of parameters produced by the custom script **must not** conflict with the names of parameters in the grid.
 
-All custom scripts are provided with all current grid parameter values as variables with the same name, as well as with variables `replicate` and `seed` that contain current replicate number and random seed for the current SLiM run.
+All custom scripts are provided with all current grid parameter values as variables with the same name, as well as the variable `replicate` that contains current replicate number.
 
 This means that if your parameter grid looks like this
 
@@ -142,7 +142,7 @@ N = [500, 1000, 2000, 5000]
 s = { from = 0, to = 0.1, num = 11 }
 ```
 
-then you can use variables `N`, `s`, `replicate`, and `seed` in the custom script. For example, you can write
+then you can use variables `N`, `s`, and `replicate` in the custom script. For example, you can write
 
 ```scheme
 (define sel (+ 1 s))
@@ -150,17 +150,15 @@ then you can use variables `N`, `s`, `replicate`, and `seed` in the custom scrip
 (parameters sel twoN)
 ```
 
-The main purpose of passing `seed` is, of course, for deterministic "random" sampling. A simple random number generator is again provided by `slim-runner`, and here is an example of how to use it:
+The main purpose of scripting is, of course, random sampling. A simple random number generator is automatically seeded with the current replicate seed and provided to the custom script by `slim-runner`. Here is an example of how to use it:
 ```scheme
-;; initialize rng (function provided to the script) 
-(define rng (new-rng seed))
 ;; currently, three sampling functions are available for use:
 ;; random-uniform samples floats in [0.0, 1.0)
-(define randf (random-uniform rng))
+(define randf (random-uniform))
 ;; random-range-float samples floats in a given range, also half-open
-(define randr (random-range-float rng 0.0 0.2))
+(define randr (random-range-float 0.0 0.2))
 ;; random-range-int works the same, but for integers
-(define randi (random-range-int rng 0 10))
+(define randi (random-range-int 0 10))
 
 ;; use random values to create new parameters
 (define sr (* s randf))
@@ -169,5 +167,6 @@ The main purpose of passing `seed` is, of course, for deterministic "random" sam
 ;; pass new parameters to SLiM
 (parameters Nr sr randr)
 ```
+Automatic seeding guarantees that runs of the program for the same grid config and custom script will always result in the same values.
 
 Scripting is implemented using the [`steel`](https://github.com/mattwparas/steel) package, so there is a very quick way to debug and test your custom code! Just use the online [Steel Playground](https://mattwparas.github.io/steel-playground/dev/). Of course, random sampling functionality and the `parameters` macro are provided by the internals of `slim-runners` so you can't use them elsewhere, but they are also typically not the parts of the script that need testing/debugging.
