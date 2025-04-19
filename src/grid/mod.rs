@@ -248,8 +248,11 @@ impl Grid {
 
         let consumer = std::thread::spawn(move || -> Result<()> {
             for r in pool_receiver.iter() {
-                r?
+                r?;
+                pb.inc(1);
             }
+
+            pb.finish();
             Ok(())
         });
 
@@ -273,7 +276,7 @@ impl Grid {
 
                 let wrt_sender = wrt_sender.clone();
                 let pool_sender = pool_sender.clone();
-                let worker = Grid::worker(pb.clone());
+                let worker = Grid::worker();
                 pool.execute(move || {
                     let result = worker(wrt_sender, cmd);
                     pool_sender
@@ -288,9 +291,6 @@ impl Grid {
         // drop instance of snd in this thread (threadpool may still own some)
         drop(pool_sender);
         drop(wrt_sender);
-
-        // finish the progress bar
-        pb.finish();
 
         // wait for the writer thread to finish
         writer
@@ -388,9 +388,7 @@ impl Grid {
 
     // rayon worker function
     // runs SLiM and packages the output into an annotated dataframe
-    fn worker(
-        pb: ProgressBar,
-    ) -> impl Fn(mpsc::Sender<(usize, LazyFrame)>, IteratorOutput) -> Result<()> {
+    fn worker() -> impl Fn(mpsc::Sender<(usize, LazyFrame)>, IteratorOutput) -> Result<()> {
         move |s, (i, num_ann, str_ann, mut command)| {
             // run SLiM
             // debug!("Running command for iteration {:?}", i);
@@ -443,8 +441,6 @@ impl Grid {
             s.send((i, d))
                 .expect("Failed to send dataframe to writer channel");
 
-            // update the progress bar
-            pb.inc(1);
             // doing great!
             Ok(())
         }
