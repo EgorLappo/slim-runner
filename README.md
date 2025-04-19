@@ -169,3 +169,5 @@ The main purpose of passing `seed` is, of course, for deterministic "random" sam
 ;; pass new parameters to SLiM
 (parameters Nr sr randr)
 ```
+
+Scripting is implemented using the [`steel`](https://github.com/mattwparas/steel) package, so there is a very quick way to debug and test your custom code! Just use the online [Steel Playground](https://mattwparas.github.io/steel-playground/dev/). Of course, random sampling functionality and the `parameters` macro are provided by the internals of `slim-runners` so you can't use them elsewhere, but they are also typically not the parts of the script that need testing/debugging.

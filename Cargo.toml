@@ -10,7 +10,7 @@ license = "GPL-3.0-or-later"
 
 [dependencies]
 indicatif-log-bridge = "0.2.3"
-clap = { version = "4.5.35", features = ["derive"] }
+clap = { version = "4.5.36", features = ["derive"] }
 indicatif = { version = "0.17.11", features = ["improved_unicode"] }
 color-eyre = "0.6.3"
 env_logger = "0.11.8"
@@ -26,7 +26,7 @@ polars = { version = "0.46.0", features = [
 rand = { version = "0.9.0", features = ["small_rng"] }
 serde = { version = "1.0.219", features = ["derive"] }
 toml = "0.8.20"
-crossbeam-channel = "0.5.14"
+crossbeam-channel = "0.5.15"
 threadpool = "1.8.1"
 steel-core = { git="https://github.com/mattwparas/steel.git", branch = "master" }
 steel-derive = { git="https://github.com/mattwparas/steel.git", branch = "master" }
