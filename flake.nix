@@ -10,11 +10,6 @@
     };
 
     flake-utils.url = "github:numtide/flake-utils";
-
-    advisory-db = {
-      url = "github:rustsec/advisory-db";
-      flake = false;
-    };
   };
 
   outputs = { self, nixpkgs, crane, fenix, flake-utils, ... }:
@@ -36,7 +31,6 @@
             # Add additional build inputs here
           ] ++ lib.optionals pkgs.stdenv.isDarwin [
             # Additional darwin specific inputs can be set here
-            pkgs.libiconv
           ];
 
           # Additional environment variables can be set directly
@@ -86,8 +80,6 @@
             # taplo arguments can be further customized below as needed
             # taploExtraArgs = "--config ./taplo.toml";
           };
-
-
         };
 
         packages = {
@@ -103,13 +95,11 @@
         };
 
         devShells.default = craneLib.devShell {
-          # Inherit inputs from checks.
           checks = self.checks.${system};
 
           # Additional dev-shell environment variables can be set directly
           # MY_CUSTOM_DEVELOPMENT_VAR = "something else";
 
-          # Extra inputs can be added here; cargo and rustc are provided by default.
           packages = [
             # pkgs.ripgrep
           ];
