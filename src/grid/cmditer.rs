@@ -1,15 +1,15 @@
 use color_eyre::eyre::{self, Context, OptionExt, Result};
 use itertools::{Itertools, MultiProduct};
 use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use std::collections::HashMap;
 use std::iter::Iterator;
 use std::path::PathBuf;
 use std::process::Command;
+use steel::SteelVal;
 use steel::rvals::FromSteelVal;
 use steel::steel_vm::engine::Engine;
 use steel::steel_vm::register_fn::RegisterFn;
-use steel::SteelVal;
 use steel_derive::Steel;
 
 #[derive(Steel, Clone, Debug)]
@@ -259,10 +259,10 @@ impl Iterator for CommandIterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         // if limit is set, check if we have reached it
-        if let Some(k) = self.limit {
-            if self.current_iteration > k {
-                return None;
-            }
+        if let Some(k) = self.limit
+            && self.current_iteration > k
+        {
+            return None;
         }
 
         // obtain new parameters if we have exhausted the replicates

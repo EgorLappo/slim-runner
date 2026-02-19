@@ -1,7 +1,7 @@
 [package]
 name = "slim-runner"
-version = "0.1.4"
-edition = "2021"
+version = "0.1.5"
+edition = "2024"
 authors = ["Egor Lappo <elappo@stanford.edu>"]
 description = "Run SLiM simulation grid runs in parallel"
 readme = "README.md"
@@ -10,23 +10,21 @@ license = "GPL-3.0-or-later"
 
 [dependencies]
 indicatif-log-bridge = "0.2.3"
-clap = { version = "4.5.36", features = ["derive"] }
-indicatif = { version = "0.17.11", features = ["improved_unicode"] }
-color-eyre = "0.6.3"
-env_logger = "0.11.8"
+clap = { version = "4.5.59", features = ["derive"] }
+indicatif = { version = "0.18.4", features = ["improved_unicode"] }
+color-eyre = "0.6.5"
+env_logger = "0.11.9"
 itertools = "0.14.0"
-jemallocator = "0.5.4"
-log = "0.4.27"
-polars = { version = "0.46.0", features = [
+log = "0.4.29"
+polars = { version = "0.53.0", features = [
     "performant",
     "lazy",
     "parquet",
-    "streaming",
 ] }
-rand = { version = "0.9.0", features = ["small_rng"] }
-serde = { version = "1.0.219", features = ["derive"] }
-toml = "0.8.20"
+rand = "0.10.0"
+serde = { version = "1.0.228", features = ["derive"] }
+toml = "1.0.3"
 crossbeam-channel = "0.5.15"
 threadpool = "1.8.1"
-steel-core = { version="0.6.0", git="https://github.com/mattwparas/steel.git", branch = "master" }
-steel-derive = { version = "0.5.0", git="https://github.com/mattwparas/steel.git", branch = "master" }
+steel-core = { version="0.8.1", git="https://github.com/mattwparas/steel.git", branch = "master" }
+steel-derive = { version="0.8.1", git="https://github.com/mattwparas/steel.git", branch = "master" }

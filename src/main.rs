@@ -1,12 +1,8 @@
 use clap::Parser;
 use color_eyre::eyre::Result;
 use indicatif::MultiProgress;
-use jemallocator::Jemalloc;
 use log::info;
 use std::path::PathBuf;
-
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
 
 mod grid;
 
