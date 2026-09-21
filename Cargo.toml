@@ -1,6 +1,6 @@
 [package]
 name = "slim-runner"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
 authors = ["Egor Lappo <elappo@stanford.edu>"]
 description = "Run SLiM simulation grid runs in parallel"
@@ -16,15 +16,11 @@ color-eyre = "0.6.5"
 env_logger = "0.11.9"
 itertools = "0.14.0"
 log = "0.4.29"
-polars = { version = "0.53.0", features = [
-    "performant",
-    "lazy",
-    "parquet",
-] }
+polars = { version = "0.53.0", features = ["performant", "lazy", "parquet"] }
 rand = "0.10.0"
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "1.0.3"
 crossbeam-channel = "0.5.15"
 threadpool = "1.8.1"
-steel-core = { version="0.8.1", git="https://github.com/mattwparas/steel.git", branch = "master" }
-steel-derive = { version="0.8.1", git="https://github.com/mattwparas/steel.git", branch = "master" }
+steel-core = { version = "0.8.1", git = "https://github.com/mattwparas/steel.git", branch = "master" }
+steel-derive = { version = "0.8.1", git = "https://github.com/mattwparas/steel.git", branch = "master" }
