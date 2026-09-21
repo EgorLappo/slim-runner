@@ -55,12 +55,12 @@ output_dir = "output"
 cores = 6
 # interval to write output to disk in parameter sets (optional, defaults to 100)
 write_every = 1000
-# annotate the output log files with grid parameter values (optional, defaults to `true`)
+# annotate the output log files with grid parameter values (optional, defaults to `false`)
 annotate = true
 # only run first `limit' simulations (optional, for debugging purposes)
 limit = 100
 # custom slim executable path (optional, defaults to `slim`) 
-slim_exe = "/path/to/slim"
+slim_executable = "/path/to/slim"
 # path to a custom script for parameter generation (optional)
 custom_script = "example_custom_script.scm"
 ```
