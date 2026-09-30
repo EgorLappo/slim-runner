@@ -13,7 +13,7 @@ nix shell github:EgorLappo/slim-runner
 
 You can also use `cargo` to install `slim-runner`. First, install Rust with [rustup](https://rustup.rs). Then, run
 ```
-cargo install --git https://github.com/EgorLappo/slim-runner.git   
+cargo install --locked --git https://github.com/EgorLappo/slim-runner.git   
 ```
 
 The executable is called `slim-runner`. The usage instructions are 
