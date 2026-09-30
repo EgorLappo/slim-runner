@@ -151,8 +151,19 @@ impl Grid {
         debug!("Using {} replicates per parameter set", replicates);
 
         // default to 1 core
-        let cores = config.settings.cores.unwrap_or(1);
-        debug!("Using {} cores", cores);
+        let available_cpus = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        let cores = config.settings.cores.unwrap_or(available_cpus);
+
+        if cores > available_cpus {
+            log::warn!(
+                "config requests {cores} parallel processes \
+            but only {available_cpus} CPUs are available to this process"
+            );
+        }
+
+        info!("Using {cores} processes acros {available_cpus} available CPUs");
 
         // if slim_executable is not provided, try $SLIM_EXE, else default to "slim"
         let slim_executable = config
