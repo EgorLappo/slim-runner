@@ -20,7 +20,6 @@ polars = { version = "0.55.2", features = ["performant", "lazy", "parquet"] }
 rand = "0.10.3"
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.1.6"
-crossbeam-channel = "0.5.17"
 threadpool = "1.8.1"
 steel-core = { version = "0.8.1", git = "https://github.com/mattwparas/steel.git", branch = "master" }
 steel-derive = { version = "0.8.1", git = "https://github.com/mattwparas/steel.git", branch = "master" }

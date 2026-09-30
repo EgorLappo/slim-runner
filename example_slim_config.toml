@@ -7,7 +7,7 @@ replicates = 10
 script = "example_script.slim"
 # output directory
 output_dir = "output"
-# number of threads to use
+# number of processes to use
 cores = 6
 # interval to write output to disk in parameter sets
 write_every = 1000
