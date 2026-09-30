@@ -25,6 +25,7 @@ struct GridConfig {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Settings {
     seed: Option<u64>,
     replicates: Option<usize>,
